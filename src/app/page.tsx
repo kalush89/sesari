@@ -1,4 +1,4 @@
-import { getAuthSession } from "@/lib/auth"
+import { getAuthSession } from "@/lib/auth/session"
 import { redirect } from "next/navigation"
 
 export default async function Home() {

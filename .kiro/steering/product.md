@@ -2,128 +2,84 @@
 inclusion: always
 ---
 
-# Sesari Development Guidelines
+---
+inclusion: always
+---
 
-## Product Overview
-Sesari is an AI-powered KPI tracker and strategy planner for founders. When implementing features, prioritize KPI visualization, SMART goal creation, and multi-tenant workspace management.
+# Sesari Product Guidelines
 
-## Required Tech Stack
+## Product Context
+Sesari is an AI-powered KPI tracker and strategy planner for founders. Core features: KPI visualization, SMART objective creation and tracking, multi-tenant workspace management, and AI-driven insights.
+
+## Tech Stack Requirements
 - **Framework**: Next.js 15 App Router with TypeScript strict mode
-- **Styling**: Tailwind CSS v4 only (no CSS modules or styled-components)
-- **State**: React Query for server state (KPI, goals, integrations)and Zustand for global and local UI state (workspace context, filters, goal modals)
-- **Architecture**: Multi-tenant with Row-Level Security (RLS)
-- **Validation**: Zod
+- **Styling**: Tailwind CSS v4 only (no custom CSS)
+- **State**: React Query (server state) + Zustand (UI state)
+- **Database**: PostgreSQL with Row-Level Security (RLS)
+- **Validation**: Zod for all inputs
 
-## Project Structure Rules
-Follow this exact structure when creating new files:
-```
-src/
-├── app/           # Next.js pages and API routes
-├── components/    # Reusable UI components
-│   └── layout/    # AppLayout, Sidebar components
-└── [feature]/     # Feature-specific components (e.g., kpi/, dashboard/)
-```
+## Component Standards
 
-## Code Standards
-
-### TypeScript Requirements
-- Define interfaces for all component props
-- Never use `any` - use proper types or `unknown`
-- Export interfaces for reusable components
-- Enable strict null checks
-
-### Component Template
-Use this exact pattern for all React components:
+### React Component Pattern
 ```typescript
-interface ComponentNameProps {
-  // Define all props with proper types
+interface ComponentProps {
+  id: string;
+  optional?: boolean;
 }
 
-export function ComponentName({ prop }: ComponentNameProps) {
-  // Include loading and error states
-  // Use functional components only
-  return <div className="tailwind-classes">content</div>
+export function ComponentName({ id, optional = false }: ComponentProps) {
+  // Server Components by default, 'use client' only when needed
+  // Always include loading/error states for async operations
+  return <div className="tailwind-classes">{content}</div>;
 }
 ```
 
-### File Naming Convention
-- Components: `PascalCase.tsx` (e.g., `KpiDashboard.tsx`)
+### File Organization
+- Components: `PascalCase.tsx` (`KpiDashboard.tsx`)
 - Pages: `page.tsx` in lowercase folders
 - Utilities: `camelCase.ts`
-- Types: `types.ts` or `ComponentName.types.ts`
+- Domain-based folders: `/dashboard`, `/kpi`, `/auth`
 
-### Import Rules
-- Always use `@/` path alias for src imports
-- Order: external libraries → internal components → types
-- Group imports with blank lines between categories
-
-## UI/UX Requirements
-
-### Design System
-- **Navigation**: `gray-900` background
-- **Page backgrounds**: `gray-100`
-- **Spacing**: Use Tailwind's spacing scale (4, 6, 8, 12, 16, 24)
-- **Responsive**: Mobile-first approach with `sm:`, `md:`, `lg:` breakpoints
-
-### Component Behavior
-- Include hover states with `hover:` classes
-- Add smooth transitions with `transition-colors duration-200`
-- Implement loading states for async operations
-- Show user-friendly error messages
-- Follow existing sidebar navigation pattern
-
-### Accessibility
-- Use semantic HTML (`<nav>`, `<main>`, `<section>`)
-- Add ARIA labels for interactive elements
-- Ensure keyboard navigation with `tabIndex`
-- Maintain WCAG color contrast ratios
-
-## Security Patterns
-
-### Multi-Tenant Architecture
-- Implement RLS for all database queries
-- Validate workspace access in API routes before data operations
-- Store secrets in environment variables only
-- Never expose API keys in client-side code
-
-### Data Validation
-- Use Zod for input validation
-- Validate inputs on both client and server
-- Sanitize user inputs before database operations
-- Return meaningful error messages without exposing system details
-
-## Business Logic
+## Business Rules
 
 ### Plan Restrictions
-- **Free**: Manual KPIs only, single workspace
-- **Starter/Pro**: Enable integrations and AI features
-- **Trial**: 14-day trial for paid plans
+- **Free Plan**: Manual KPIs only, single workspace
+- **Paid Plans**: Integrations, AI features, multiple workspaces
+- **Trial**: 14-day trial for paid features
 
-### Required Integrations
-- **Stripe**: Revenue metrics and subscription management
-- **Google Analytics**: Traffic and conversion data
-- **OpenAI**: AI goal suggestions and insights
+### Core Integrations
+- **Stripe**: Revenue/MRR tracking + subscription management
+- **Google Analytics**: Traffic and conversion metrics
+- **OpenAI**: AI objective suggestions and insights
 - **Lemon Squeezy**: Payment processing
-- **Resend**: Email notifications
 
-## Core Features
+## Key Features
 
-### Key Components
-- **Momentum Meter**: Circular progress for workspace health
-- **KPI Dashboard**: Chart visualization with goal tracking
-- **AI Strategy Planner**: SMART goal generation with KPI binding
-- **Weekly Insights**: Automated performance summaries
+### Priority Components
+1. **KPI Dashboard**: Chart visualization with objective tracking
+2. **Momentum Meter**: Circular progress for workspace health
+3. **AI Strategy Planner**: SMART objective generation
+4. **Weekly Insights**: Automated performance summaries
 
-### Implementation Priority
-1. Google OAuth authentication with workspace tenancy
-2. Manual KPI dashboard with chart visualization
-3. Stripe and Google Analytics integrations
-4. AI-powered goal creation and suggestions
-5. Billing and subscription management
+### Multi-Tenant Security
+- All database queries must enforce workspace isolation via RLS
+- Validate workspace access in API routes before data operations
+- Never bypass RLS except for admin operations
+- Store workspace context in Zustand for UI state
 
-## Development Guidelines
-- Create minimal, focused components
-- Handle loading and error states in all async operations
-- Follow existing patterns in layout components
-- Test multi-tenant scenarios during development
-- Prioritize mobile responsiveness in all UI components
+## Development Patterns
+
+### State Management
+- **React Query**: KPIs, objectives, integrations (server state)
+- **Zustand**: Workspace context, modals, filters (UI state)
+- Call `queryClient.invalidateQueries()` after mutations
+
+### Error Handling
+- Include loading states for all async operations
+- Show user-friendly error messages (no technical details)
+- Implement graceful fallbacks for failed operations
+
+### Mobile-First Design
+- Use responsive Tailwind classes (`sm:`, `md:`, `lg:`)
+- Test on 320px minimum width
+- Prioritize touch-friendly interactions
