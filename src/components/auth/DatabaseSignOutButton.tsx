@@ -4,12 +4,16 @@ import { signOut } from 'next-auth/react';
 import { useState } from 'react';
 import { useWorkspaceStore } from '@/lib/stores/workspace-store';
 
-interface SignOutButtonProps {
+interface DatabaseSignOutButtonProps {
   className?: string;
   children?: React.ReactNode;
 }
 
-export function SignOutButton({ className, children }: SignOutButtonProps) {
+/**
+ * Sign-out button that properly handles database session cleanup
+ * This addresses the root cause of the sign-out issue with database sessions
+ */
+export function DatabaseSignOutButton({ className, children }: DatabaseSignOutButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const { clearWorkspaceContext } = useWorkspaceStore();
 
@@ -17,31 +21,42 @@ export function SignOutButton({ className, children }: SignOutButtonProps) {
     try {
       setIsLoading(true);
       
-      // Clear workspace context immediately
-      clearWorkspaceContext();
+      console.log('🔄 Starting database-aware sign-out process...');
       
-      // Clear local storage to ensure clean state
+      // Step 1: Call custom signout API to delete database sessions
       try {
-        localStorage.removeItem('workspace-context');
-        sessionStorage.clear();
-      } catch (storageError) {
-        console.warn('Failed to clear storage:', storageError);
-      }
-      
-      // Call custom signout cleanup first
-      try {
-        await fetch('/api/auth/signout', {
+        const response = await fetch('/api/auth/signout', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
         });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Database session cleanup:', result);
+        } else {
+          console.warn('⚠️ Database session cleanup failed, continuing with signout');
+        }
       } catch (cleanupError) {
-        console.warn('Custom signout cleanup failed:', cleanupError);
+        console.warn('⚠️ Custom signout cleanup failed:', cleanupError);
+        // Continue with signout even if cleanup fails
       }
       
-      // Use NextAuth signOut with redirect enabled
-      console.log('Attempting NextAuth signOut...');
+      // Step 2: Clear workspace context
+      clearWorkspaceContext();
+      
+      // Step 3: Clear client-side storage
+      try {
+        localStorage.removeItem('workspace-context');
+        sessionStorage.clear();
+        console.log('✅ Client-side storage cleared');
+      } catch (storageError) {
+        console.warn('⚠️ Failed to clear storage:', storageError);
+      }
+      
+      // Step 4: Call NextAuth signOut (this should now work properly)
+      console.log('🚪 Calling NextAuth signOut...');
       
       await signOut({
         callbackUrl: '/signin',
@@ -49,9 +64,9 @@ export function SignOutButton({ className, children }: SignOutButtonProps) {
       });
       
     } catch (error) {
-      console.error('Sign out error:', error);
+      console.error('❌ Database sign-out failed:', error);
       
-      // If everything fails, force a hard redirect
+      // Fallback: force redirect even if signout fails
       clearWorkspaceContext();
       try {
         localStorage.clear();
@@ -60,7 +75,7 @@ export function SignOutButton({ className, children }: SignOutButtonProps) {
         console.warn('Failed to clear storage in error handler:', storageError);
       }
       
-      // Force redirect to signin
+      // Force redirect
       window.location.href = '/signin';
     } finally {
       setIsLoading(false);

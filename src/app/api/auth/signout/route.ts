@@ -14,18 +14,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true }); // Already signed out
     }
 
-    // Perform any server-side cleanup here
-    // For example:
-    // - Invalidate refresh tokens
-    // - Clear cached data
-    // - Log signout event
-    
-    console.log(`Custom signout cleanup for user: ${session.user.email}`);
-    
-    return NextResponse.json({ 
-      success: true,
-      message: 'Signout cleanup completed'
-    });
+    // Explicitly delete all database sessions for this user
+    try {
+      const { deleteUserSessions } = await import('@/lib/auth/session-cleanup');
+      
+      const deletedCount = await deleteUserSessions(session.user.id);
+      
+      console.log(`Custom signout cleanup for user: ${session.user.email}`);
+      console.log(`Deleted ${deletedCount} database sessions`);
+      
+      return NextResponse.json({ 
+        success: true,
+        message: 'Signout cleanup completed',
+        deletedSessions: deletedCount
+      });
+    } catch (dbError) {
+      console.error('Error deleting database sessions:', dbError);
+      
+      // Still return success since the main signout should proceed
+      return NextResponse.json({ 
+        success: true,
+        message: 'Signout cleanup completed with warnings',
+        warning: 'Database session cleanup failed'
+      });
+    }
   } catch (error) {
     console.error('Error in custom signout:', error);
     return NextResponse.json(

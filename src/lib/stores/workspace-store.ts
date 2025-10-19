@@ -17,6 +17,10 @@ export interface WorkspaceContextState {
   isLoading: boolean;
   error: string | null;
   
+  // Cache management
+  lastFetchTime: number | null;
+  cacheTimeout: number;
+  
   // Actions
   setCurrentWorkspace: (workspace: WorkspaceWithMembership, role: WorkspaceRole, permissions: Permission[]) => void;
   setAvailableWorkspaces: (workspaces: WorkspaceWithMembership[]) => void;
@@ -41,6 +45,8 @@ export const useWorkspaceStore = create<WorkspaceContextState>()(
       permissions: [],
       isLoading: false,
       error: null,
+      lastFetchTime: null,
+      cacheTimeout: 5 * 60 * 1000, // 5 minutes cache
 
       // Set current workspace with role and permissions
       setCurrentWorkspace: (workspace, role, permissions) => {
@@ -104,8 +110,20 @@ export const useWorkspaceStore = create<WorkspaceContextState>()(
         }
       },
 
-      // Refresh available workspaces
+      // Refresh available workspaces with caching
       refreshWorkspaces: async () => {
+        const { lastFetchTime, cacheTimeout, isLoading } = get();
+        
+        // Check if we have recent data and avoid unnecessary API calls
+        if (lastFetchTime && Date.now() - lastFetchTime < cacheTimeout) {
+          return; // Use cached data
+        }
+        
+        // Prevent multiple concurrent requests
+        if (isLoading) {
+          return;
+        }
+
         set({ isLoading: true, error: null });
 
         try {
@@ -124,6 +142,7 @@ export const useWorkspaceStore = create<WorkspaceContextState>()(
             permissions,
             isLoading: false,
             error: null,
+            lastFetchTime: Date.now(),
           });
         } catch (error) {
           set({
@@ -142,6 +161,7 @@ export const useWorkspaceStore = create<WorkspaceContextState>()(
           permissions: [],
           error: null,
           isLoading: false,
+          lastFetchTime: null,
         });
       },
 

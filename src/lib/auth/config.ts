@@ -1,4 +1,5 @@
-import { NextAuthOptions } from 'next-auth';
+import { NextAuthOptions, Session, Account, User } from 'next-auth';
+import { JWT } from "next-auth/jwt";
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import GoogleProvider from 'next-auth/providers/google';
 import { prisma } from '../db';
@@ -61,11 +62,18 @@ export const authOptions: NextAuthOptions = {
      * Session callback - runs whenever a session is checked
      * Used to add workspace context to the session
      */
-    async session({ session, user }) {
+    async session({
+      session,
+      user,
+    }: {
+      session: Session;
+      user?: User;
+      newSession?: any;
+    }): Promise<ExtendedSession> {
       try {
         // Get user's workspace memberships
         const userWithWorkspaces = await prisma.user.findUnique({
-          where: { id: user.id },
+          where: { id: user?.id! },
           include: {
             workspaceMemberships: {
               include: {
@@ -92,7 +100,7 @@ export const authOptions: NextAuthOptions = {
         const extendedSession: ExtendedSession = {
           ...session,
           user: {
-            id: user.id,
+            id: user?.id!,
             email: session.user?.email || '',
             name: session.user?.name || '',
             image: session.user?.image || undefined,
@@ -108,7 +116,7 @@ export const authOptions: NextAuthOptions = {
         return {
           ...session,
           user: {
-            id: user.id,
+            id: user?.id!,
             email: session.user?.email || '',
             name: session.user?.name || '',
             image: session.user?.image || undefined,
@@ -121,7 +129,7 @@ export const authOptions: NextAuthOptions = {
      * SignIn callback - controls whether a user is allowed to sign in
      * Used for additional validation and workspace assignment
      */
-    async signIn({ user, account }) {
+    async signIn({ account }: { account: Account | null }) {
       try {
         // Allow sign in for Google OAuth
         if (account?.provider === 'google') {
@@ -138,7 +146,7 @@ export const authOptions: NextAuthOptions = {
     /**
      * Redirect callback - controls where users are redirected after sign in
      */
-    async redirect({ url, baseUrl }) {
+    async redirect({ url, baseUrl }: { url: string; baseUrl: string }) {
       // Allows relative callback URLs
       if (url.startsWith('/')) return `${baseUrl}${url}`;
 
@@ -152,7 +160,7 @@ export const authOptions: NextAuthOptions = {
 
   // Event handlers for logging and analytics
   events: {
-    async signIn({ user, isNewUser }) {
+    async signIn({ user, isNewUser }: { user: User; isNewUser?: boolean }) {
       console.log(`User signed in: ${user.email} (new: ${isNewUser})`);
 
       // Process pending invitations for both new and existing users
@@ -203,8 +211,32 @@ export const authOptions: NextAuthOptions = {
       }
     },
 
-    async signOut({ session }) {
-      console.log(`User signed out: ${session?.user?.email}`);
+    async signOut({ session, token }: { session: Session; token: JWT }) {
+      console.log(`User signed out: ${session?.user?.email || token?.email}`);
+
+      // Explicitly delete database session records for this user
+      try {
+        const { deleteUserSessions } = await import('./session-cleanup');
+
+        // For database sessions, we need to get the user ID from the token or find it another way
+        if (token?.sub) {
+          await deleteUserSessions(token.sub);
+          console.log(`Cleaned up all database sessions for user ID: ${token.sub}`);
+        } else if (session?.user?.email) {
+          // Fallback: find user by email if we don't have the ID
+          const user = await prisma.user.findUnique({
+            where: { email: session.user.email },
+            select: { id: true }
+          });
+          if (user?.id) {
+            await deleteUserSessions(user.id);
+            console.log(`Cleaned up all database sessions for user: ${session.user.email}`);
+          }
+        }
+      } catch (error) {
+        console.error('Error deleting database sessions during signout:', error);
+        // Don't fail the signout process if session cleanup fails
+      }
 
       // Additional cleanup can be added here if needed
       // For example, invalidating tokens, clearing cache, etc.

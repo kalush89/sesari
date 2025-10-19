@@ -20,13 +20,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get all workspace memberships for the user
+    // Get all workspace memberships for the user with optimized query
     const memberships = await prisma.workspaceMembership.findMany({
       where: {
         userId: session.user.id,
       },
       include: {
-        workspace: true,
+        workspace: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            ownerId: true,
+            planType: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
       },
       orderBy: {
         joinedAt: 'asc',

@@ -67,7 +67,17 @@ This document summarizes the NextAuth.js configuration that has been implemented
 - `SignInForm`: Client-side Google OAuth sign-in with loading states
 - `AuthErrorDisplay`: Displays authentication errors with retry guidance
 - `SignOutButton`: Sign-out functionality with loading states
-- `SessionProvider`: NextAuth session context provider
+- `SessionProvider`: Enhanced NextAuth session provider with workspace sync
+- `AuthProvider`: Unified authentication context provider
+- `AuthGuard`: Route and component protection with role-based access control
+- `AuthLoadingWrapper`: Loading state management for authentication operations
+
+**✅ Client-Side Session Management:**
+- `useAuth`: Comprehensive authentication hook combining NextAuth and workspace context
+- `useAuthReady`: Hook to check if authentication and workspace context is ready
+- `useAuthHeaders`: Hook to get authentication headers for API requests
+- `useHasPermission`: Hook to check user permissions in current workspace
+- `useUserRole`: Hook to get user's role in current workspace
 
 ### 🛡️ Security Features
 

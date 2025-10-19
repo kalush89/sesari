@@ -1,7 +1,6 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { AuthError } from '@/lib/types/auth';
 
 const ERROR_MESSAGES: Record<string, { title: string; message: string; retryable: boolean }> = {
   Configuration: {

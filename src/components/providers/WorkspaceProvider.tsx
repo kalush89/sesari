@@ -33,26 +33,26 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       return;
     }
 
-    if (status === 'authenticated' && session?.user) {
+    if (status === 'authenticated' && session?.user && !isLoading) {
       // Initialize workspace context when user is authenticated
       const initializeWorkspaces = async () => {
         try {
-          setLoading(true);
           await refreshWorkspaces();
         } catch (error) {
           console.error('Failed to initialize workspace context:', error);
-        } finally {
-          setLoading(false);
         }
       };
 
       // Only initialize if we don't have a current workspace or if session workspace changed
       const extendedSession = session as any;
-      if (!currentWorkspace || (extendedSession?.workspaceId && currentWorkspace.id !== extendedSession.workspaceId)) {
+      const needsInitialization = !currentWorkspace || 
+        (extendedSession?.workspaceId && currentWorkspace.id !== extendedSession.workspaceId);
+      
+      if (needsInitialization) {
         initializeWorkspaces();
       }
     }
-  }, [status, session, refreshWorkspaces, clearWorkspaceContext, currentWorkspace, setLoading]);
+  }, [status, session?.user?.id, refreshWorkspaces, clearWorkspaceContext, currentWorkspace, isLoading]);
 
   // Show loading state while initializing workspace context
   if (status === 'authenticated' && isLoading && !currentWorkspace) {

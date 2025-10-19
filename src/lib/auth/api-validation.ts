@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { WorkspaceRole, Permission, hasPermission } from '../db';
 import { AuthError } from '../types/auth';
+import { securityAuditLogger, withSecurityAudit } from './security-audit';
 
 /**
  * API validation error class
@@ -20,6 +21,7 @@ export class ApiValidationError extends Error {
 /**
  * Validate authentication for API routes
  * Returns the authenticated user session
+ * Requirements: 4.3, 5.1
  */
 export async function validateAuth(request: NextRequest) {
   const token = await getToken({ 
@@ -28,12 +30,33 @@ export async function validateAuth(request: NextRequest) {
   });
 
   if (!token || !token.sub) {
+    // Log authentication failure
+    securityAuditLogger.log({
+      endpoint: new URL(request.url).pathname,
+      method: request.method,
+      action: 'authentication_failed',
+      reason: 'No valid token found',
+      ipAddress: getClientIP(request),
+      userAgent: request.headers.get('user-agent') || undefined
+    });
+
     throw new ApiValidationError(
       AuthError.SESSION_EXPIRED,
       'Authentication required',
       401
     );
   }
+
+  // Log successful authentication
+  securityAuditLogger.log({
+    endpoint: new URL(request.url).pathname,
+    method: request.method,
+    action: 'access_granted',
+    userId: token.sub,
+    workspaceId: token.workspaceId as string | undefined,
+    ipAddress: getClientIP(request),
+    userAgent: request.headers.get('user-agent') || undefined
+  });
 
   return {
     userId: token.sub,
@@ -45,8 +68,27 @@ export async function validateAuth(request: NextRequest) {
 }
 
 /**
+ * Extract client IP address from request
+ */
+function getClientIP(request: NextRequest): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  const realIP = request.headers.get('x-real-ip');
+  
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  
+  if (realIP) {
+    return realIP;
+  }
+
+  return 'unknown';
+}
+
+/**
  * Validate workspace access for API routes
  * Returns the authenticated user session with workspace context
+ * Requirements: 4.3, 4.4, 3.4
  */
 export async function validateWorkspaceAuth(
   request: NextRequest, 
@@ -55,6 +97,18 @@ export async function validateWorkspaceAuth(
   const session = await validateAuth(request);
 
   if (!session.workspaceId || session.workspaceId !== workspaceId) {
+    // Log workspace access denial
+    securityAuditLogger.log({
+      endpoint: new URL(request.url).pathname,
+      method: request.method,
+      action: 'access_denied',
+      userId: session.userId,
+      workspaceId: workspaceId,
+      reason: `User workspace (${session.workspaceId}) does not match requested workspace (${workspaceId})`,
+      ipAddress: getClientIP(request),
+      userAgent: request.headers.get('user-agent') || undefined
+    });
+
     throw new ApiValidationError(
       AuthError.WORKSPACE_ACCESS_DENIED,
       'Access denied to this workspace',
@@ -63,6 +117,18 @@ export async function validateWorkspaceAuth(
   }
 
   if (!session.role) {
+    // Log missing role
+    securityAuditLogger.log({
+      endpoint: new URL(request.url).pathname,
+      method: request.method,
+      action: 'permission_denied',
+      userId: session.userId,
+      workspaceId: workspaceId,
+      reason: 'No role assigned in workspace',
+      ipAddress: getClientIP(request),
+      userAgent: request.headers.get('user-agent') || undefined
+    });
+
     throw new ApiValidationError(
       AuthError.INSUFFICIENT_PERMISSIONS,
       'No role assigned in workspace',
@@ -80,6 +146,7 @@ export async function validateWorkspaceAuth(
 /**
  * Validate specific permission for API routes
  * Returns the authenticated user session if they have the required permission
+ * Requirements: 3.4, 4.4
  */
 export async function validatePermission(
   request: NextRequest,
@@ -89,6 +156,18 @@ export async function validatePermission(
   const session = await validateWorkspaceAuth(request, workspaceId);
 
   if (!hasPermission(session.role, permission)) {
+    // Log permission denial
+    securityAuditLogger.log({
+      endpoint: new URL(request.url).pathname,
+      method: request.method,
+      action: 'permission_denied',
+      userId: session.userId,
+      workspaceId: workspaceId,
+      reason: `User role (${session.role}) lacks required permission: ${permission}`,
+      ipAddress: getClientIP(request),
+      userAgent: request.headers.get('user-agent') || undefined
+    });
+
     throw new ApiValidationError(
       AuthError.INSUFFICIENT_PERMISSIONS,
       `Permission denied: ${permission}`,
@@ -184,16 +263,17 @@ export function handleApiError(error: unknown): Response {
 }
 
 /**
- * Wrapper for API route handlers with automatic error handling
+ * Wrapper for API route handlers with automatic error handling and security audit
+ * Requirements: 4.3, 4.4, 3.4, 5.1
  */
 export function withApiValidation<T extends any[]>(
   handler: (...args: T) => Promise<Response>
 ) {
-  return async (...args: T): Promise<Response> => {
+  return withSecurityAudit(async (...args: T): Promise<Response> => {
     try {
       return await handler(...args);
     } catch (error) {
       return handleApiError(error);
     }
-  };
+  });
 }
