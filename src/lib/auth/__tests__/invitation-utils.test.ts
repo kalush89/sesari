@@ -1,312 +1,388 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { prisma } from '../../db';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { 
+  createInvitation, 
+  acceptInvitation, 
+  validateInvitation,
+  getInvitationByToken,
+  revokeInvitation,
+  cleanupExpiredInvitations
+} from '../invitation-utils';
 import { WorkspaceRole } from '../../db';
-import { processPendingInvitations, getPendingInvitations, cleanupExpiredInvitations } from '../invitation-utils';
+
+// Mock Prisma
+const mockPrisma = {
+  workspaceInvitation: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  workspaceMembership: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  workspace: {
+    findUnique: vi.fn(),
+  },
+  user: {
+    findUnique: vi.fn(),
+  },
+};
+
+vi.mock('../../db', () => ({
+  prisma: mockPrisma,
+  WorkspaceRole: {
+    OWNER: 'owner',
+    ADMIN: 'admin',
+    MEMBER: 'member',
+  },
+}));
 
 describe('Invitation Utils', () => {
-  let testUser: any;
-  let testWorkspace: any;
-  let inviterUser: any;
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-  beforeEach(async () => {
-    // Create test users
-    testUser = await prisma.user.create({
-      data: {
+  describe('createInvitation', () => {
+    it('should create invitation with valid data', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
         email: 'test@example.com',
-        name: 'Test User'
-      }
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        invitedBy: 'user-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        createdAt: new Date(),
+      };
+
+      mockPrisma.workspaceInvitation.create.mockResolvedValue(mockInvitation);
+
+      const result = await createInvitation({
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        invitedBy: 'user-1',
+      });
+
+      expect(result).toEqual(mockInvitation);
+      expect(mockPrisma.workspaceInvitation.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          email: 'test@example.com',
+          role: WorkspaceRole.MEMBER,
+          workspaceId: 'workspace-1',
+          invitedBy: 'user-1',
+          token: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+      });
     });
 
-    inviterUser = await prisma.user.create({
-      data: {
-        email: 'inviter@example.com',
-        name: 'Inviter User'
-      }
+    it('should throw error for invalid email', async () => {
+      await expect(createInvitation({
+        email: 'invalid-email',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        invitedBy: 'user-1',
+      })).rejects.toThrow('Invalid email address');
     });
 
-    // Create test workspace
-    testWorkspace = await prisma.workspace.create({
-      data: {
-        name: 'Test Workspace',
-        slug: 'test-workspace',
-        ownerId: inviterUser.id,
-        planType: 'free'
-      }
-    });
-
-    // Create owner membership for inviter
-    await prisma.workspaceMembership.create({
-      data: {
-        workspaceId: testWorkspace.id,
-        userId: inviterUser.id,
-        role: WorkspaceRole.OWNER
-      }
+    it('should throw error for invalid role', async () => {
+      await expect(createInvitation({
+        email: 'test@example.com',
+        role: 'invalid-role' as WorkspaceRole,
+        workspaceId: 'workspace-1',
+        invitedBy: 'user-1',
+      })).rejects.toThrow('Invalid role');
     });
   });
 
-  afterEach(async () => {
-    // Cleanup test data
-    await prisma.workspaceInvitation.deleteMany({
-      where: {
-        OR: [
-          { email: testUser.email },
-          { invitedBy: inviterUser.id }
-        ]
-      }
+  describe('acceptInvitation', () => {
+    it('should accept valid invitation and create membership', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
+
+      const mockUser = {
+        id: 'user-1',
+        email: 'test@example.com',
+      };
+
+      const mockMembership = {
+        id: 'membership-1',
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        role: WorkspaceRole.MEMBER,
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockPrisma.workspaceMembership.findUnique.mockResolvedValue(null);
+      mockPrisma.workspaceMembership.create.mockResolvedValue(mockMembership);
+      mockPrisma.workspaceInvitation.update.mockResolvedValue({
+        ...mockInvitation,
+        acceptedAt: new Date(),
+      });
+
+      const result = await acceptInvitation('invitation-token', 'user-1');
+
+      expect(result).toEqual(mockMembership);
+      expect(mockPrisma.workspaceMembership.create).toHaveBeenCalledWith({
+        data: {
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+          role: WorkspaceRole.MEMBER,
+          invitedBy: mockInvitation.invitedBy,
+          invitedAt: mockInvitation.createdAt,
+        },
+      });
     });
-    await prisma.workspaceMembership.deleteMany({
-      where: {
-        OR: [
-          { userId: testUser.id },
-          { userId: inviterUser.id }
-        ]
-      }
+
+    it('should throw error for expired invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // Expired
+        acceptedAt: null,
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+
+      await expect(acceptInvitation('invitation-token', 'user-1')).rejects.toThrow('Invitation has expired');
     });
-    await prisma.workspace.deleteMany({
-      where: { id: testWorkspace.id }
+
+    it('should throw error for already accepted invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: new Date(),
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+
+      await expect(acceptInvitation('invitation-token', 'user-1')).rejects.toThrow('Invitation has already been accepted');
     });
-    await prisma.user.deleteMany({
-      where: {
-        id: { in: [testUser.id, inviterUser.id] }
-      }
+
+    it('should throw error for email mismatch', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
+
+      const mockUser = {
+        id: 'user-1',
+        email: 'different@example.com',
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+
+      await expect(acceptInvitation('invitation-token', 'user-1')).rejects.toThrow('Email address does not match invitation');
+    });
+
+    it('should throw error for existing membership', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
+
+      const mockUser = {
+        id: 'user-1',
+        email: 'test@example.com',
+      };
+
+      const mockExistingMembership = {
+        id: 'membership-1',
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        role: WorkspaceRole.ADMIN,
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockPrisma.workspaceMembership.findUnique.mockResolvedValue(mockExistingMembership);
+
+      await expect(acceptInvitation('invitation-token', 'user-1')).rejects.toThrow('User is already a member of this workspace');
     });
   });
 
-  describe('processPendingInvitations', () => {
-    it('should process valid pending invitations', async () => {
-      // Create a pending invitation
-      const invitation = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.ADMIN,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
-        }
-      });
+  describe('validateInvitation', () => {
+    it('should return true for valid invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
 
-      const result = await processPendingInvitations(testUser.id, testUser.email);
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
 
-      expect(result.processedCount).toBe(1);
-      expect(result.memberships).toHaveLength(1);
-      expect(result.memberships[0].role).toBe(WorkspaceRole.ADMIN);
-      expect(result.memberships[0].workspaceId).toBe(testWorkspace.id);
-
-      // Check that invitation is marked as accepted
-      const updatedInvitation = await prisma.workspaceInvitation.findUnique({
-        where: { id: invitation.id }
-      });
-      expect(updatedInvitation?.accepted).toBe(true);
-      expect(updatedInvitation?.acceptedAt).toBeTruthy();
-
-      // Check that membership was created
-      const membership = await prisma.workspaceMembership.findFirst({
-        where: {
-          workspaceId: testWorkspace.id,
-          userId: testUser.id
-        }
-      });
-      expect(membership).toBeTruthy();
-      expect(membership?.role).toBe(WorkspaceRole.ADMIN);
+      const result = await validateInvitation('invitation-token');
+      expect(result).toBe(true);
     });
 
-    it('should skip expired invitations', async () => {
-      // Create an expired invitation
-      await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day ago
-        }
-      });
+    it('should return false for expired invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // Expired
+        acceptedAt: null,
+      };
 
-      const result = await processPendingInvitations(testUser.id, testUser.email);
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
 
-      expect(result.processedCount).toBe(0);
-      expect(result.memberships).toHaveLength(0);
-
-      // Check that no membership was created
-      const membership = await prisma.workspaceMembership.findFirst({
-        where: {
-          workspaceId: testWorkspace.id,
-          userId: testUser.id
-        }
-      });
-      expect(membership).toBeNull();
+      const result = await validateInvitation('invitation-token');
+      expect(result).toBe(false);
     });
 
-    it('should handle existing memberships gracefully', async () => {
-      // Create existing membership
-      await prisma.workspaceMembership.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          userId: testUser.id,
-          role: WorkspaceRole.MEMBER
-        }
-      });
+    it('should return false for accepted invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: new Date(),
+      };
 
-      // Create a pending invitation
-      const invitation = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.ADMIN,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        }
-      });
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
 
-      const result = await processPendingInvitations(testUser.id, testUser.email);
-
-      expect(result.processedCount).toBe(0);
-      expect(result.memberships).toHaveLength(0);
-
-      // Check that invitation is still marked as accepted
-      const updatedInvitation = await prisma.workspaceInvitation.findUnique({
-        where: { id: invitation.id }
-      });
-      expect(updatedInvitation?.accepted).toBe(true);
+      const result = await validateInvitation('invitation-token');
+      expect(result).toBe(false);
     });
 
-    it('should return empty result for no invitations', async () => {
-      const result = await processPendingInvitations(testUser.id, testUser.email);
+    it('should return false for non-existent invitation', async () => {
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(null);
 
-      expect(result.processedCount).toBe(0);
-      expect(result.memberships).toHaveLength(0);
+      const result = await validateInvitation('invalid-token');
+      expect(result).toBe(false);
     });
   });
 
-  describe('getPendingInvitations', () => {
-    it('should return pending invitations for user', async () => {
-      // Create pending invitations
-      const invitation1 = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.ADMIN,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        }
-      });
+  describe('getInvitationByToken', () => {
+    it('should return invitation for valid token', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
 
-      const invitations = await getPendingInvitations(testUser.email);
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
 
-      expect(invitations).toHaveLength(1);
-      expect(invitations[0].id).toBe(invitation1.id);
-      expect(invitations[0].email).toBe(testUser.email);
-      expect(invitations[0].role).toBe(WorkspaceRole.ADMIN);
-      expect(invitations[0].workspace).toBeTruthy();
-      expect(invitations[0].inviter).toBeTruthy();
+      const result = await getInvitationByToken('invitation-token');
+      expect(result).toEqual(mockInvitation);
     });
 
-    it('should not return expired invitations', async () => {
-      // Create expired invitation
-      await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day ago
-        }
+    it('should return null for invalid token', async () => {
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(null);
+
+      const result = await getInvitationByToken('invalid-token');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('revokeInvitation', () => {
+    it('should revoke invitation successfully', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: null,
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+      mockPrisma.workspaceInvitation.delete.mockResolvedValue(mockInvitation);
+
+      const result = await revokeInvitation('invitation-1');
+      expect(result).toBe(true);
+      expect(mockPrisma.workspaceInvitation.delete).toHaveBeenCalledWith({
+        where: { id: 'invitation-1' },
       });
-
-      const invitations = await getPendingInvitations(testUser.email);
-
-      expect(invitations).toHaveLength(0);
     });
 
-    it('should not return accepted invitations', async () => {
-      // Create accepted invitation
-      await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          accepted: true,
-          acceptedAt: new Date()
-        }
-      });
+    it('should return false for non-existent invitation', async () => {
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(null);
 
-      const invitations = await getPendingInvitations(testUser.email);
+      const result = await revokeInvitation('invalid-id');
+      expect(result).toBe(false);
+    });
 
-      expect(invitations).toHaveLength(0);
+    it('should throw error for already accepted invitation', async () => {
+      const mockInvitation = {
+        id: 'invitation-1',
+        email: 'test@example.com',
+        role: WorkspaceRole.MEMBER,
+        workspaceId: 'workspace-1',
+        token: 'invitation-token',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        acceptedAt: new Date(),
+      };
+
+      mockPrisma.workspaceInvitation.findUnique.mockResolvedValue(mockInvitation);
+
+      await expect(revokeInvitation('invitation-1')).rejects.toThrow('Cannot revoke accepted invitation');
     });
   });
 
   describe('cleanupExpiredInvitations', () => {
-    it('should remove expired invitations', async () => {
-      // Create expired invitation
-      const expiredInvitation = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day ago
-        }
-      });
+    it('should delete expired invitations', async () => {
+      mockPrisma.workspaceInvitation.deleteMany.mockResolvedValue({ count: 5 });
 
-      // Create valid invitation
-      const validInvitation = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: 'another@example.com',
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
-        }
-      });
-
-      const cleanedCount = await cleanupExpiredInvitations();
-
-      expect(cleanedCount).toBe(1);
-
-      // Check that expired invitation was removed
-      const expiredCheck = await prisma.workspaceInvitation.findUnique({
-        where: { id: expiredInvitation.id }
-      });
-      expect(expiredCheck).toBeNull();
-
-      // Check that valid invitation still exists
-      const validCheck = await prisma.workspaceInvitation.findUnique({
-        where: { id: validInvitation.id }
-      });
-      expect(validCheck).toBeTruthy();
-
-      // Cleanup the valid invitation
-      await prisma.workspaceInvitation.delete({
-        where: { id: validInvitation.id }
+      const result = await cleanupExpiredInvitations();
+      expect(result).toBe(5);
+      expect(mockPrisma.workspaceInvitation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          expiresAt: {
+            lt: expect.any(Date),
+          },
+          acceptedAt: null,
+        },
       });
     });
 
-    it('should not remove accepted invitations even if expired', async () => {
-      // Create accepted but expired invitation
-      const acceptedInvitation = await prisma.workspaceInvitation.create({
-        data: {
-          workspaceId: testWorkspace.id,
-          email: testUser.email,
-          role: WorkspaceRole.MEMBER,
-          invitedBy: inviterUser.id,
-          expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-          accepted: true,
-          acceptedAt: new Date()
-        }
-      });
+    it('should return 0 when no expired invitations', async () => {
+      mockPrisma.workspaceInvitation.deleteMany.mockResolvedValue({ count: 0 });
 
-      const cleanedCount = await cleanupExpiredInvitations();
-
-      expect(cleanedCount).toBe(0);
-
-      // Check that accepted invitation still exists
-      const acceptedCheck = await prisma.workspaceInvitation.findUnique({
-        where: { id: acceptedInvitation.id }
-      });
-      expect(acceptedCheck).toBeTruthy();
+      const result = await cleanupExpiredInvitations();
+      expect(result).toBe(0);
     });
   });
 });

@@ -19,7 +19,7 @@ const InviteMemberSchema = z.object({
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { workspaceId: string } }
+  { params }: { params: Promise<{ workspaceId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId } = params;
+    const { workspaceId } = await params;
 
     // Set RLS context
     await setRLSContext(prisma, session.user.id);
@@ -115,7 +115,7 @@ export async function GET(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { workspaceId: string } }
+  { params }: { params: Promise<{ workspaceId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -123,7 +123,7 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId } = params;
+    const { workspaceId } = await params;
     const body = await request.json();
 
     // Validate request body

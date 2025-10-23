@@ -170,3 +170,55 @@ export async function cleanupExpiredInvitations() {
     return 0;
   }
 }
+
+/**
+ * Generate a unique workspace slug from a name
+ */
+export function createWorkspaceSlug(name: string, suffix?: number): string {
+  const baseSlug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .trim() || 'workspace';
+  
+  return suffix ? `${baseSlug}-${suffix}` : baseSlug;
+}
+
+/**
+ * Generate a secure invitation token
+ */
+export function generateInvitationToken(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Validate an invitation token format
+ */
+export function validateInvitationToken(token: string): boolean {
+  // UUID v4 format validation
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(token);
+}
+
+/**
+ * Log authentication events for audit trail
+ */
+export function logAuthEvent(userId: string, event: string, metadata?: Record<string, any>) {
+  console.log('AUTH_EVENT', {
+    userId,
+    event,
+    metadata,
+    timestamp: new Date().toISOString()
+  });
+}
+
+/**
+ * Log security events for monitoring
+ */
+export function logSecurityEvent(event: string, metadata?: Record<string, any>) {
+  console.warn('SECURITY_EVENT', {
+    event,
+    metadata,
+    timestamp: new Date().toISOString()
+  });
+}

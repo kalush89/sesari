@@ -10,7 +10,7 @@ import { hasPermission, WorkspaceRole, Permission } from '@/lib/db';
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { workspaceId: string; invitationId: string } }
+  { params }: { params: Promise<{ workspaceId: string; invitationId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -18,7 +18,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId, invitationId } = params;
+    const { workspaceId, invitationId } = await params;
 
     // Set RLS context
     await setRLSContext(prisma, session.user.id);
@@ -76,7 +76,7 @@ export async function DELETE(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { workspaceId: string; invitationId: string } }
+  { params }: { params: Promise<{ workspaceId: string; invitationId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -84,7 +84,7 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId, invitationId } = params;
+    const { workspaceId, invitationId } = await params;
 
     // Set RLS context
     await setRLSContext(prisma, session.user.id);

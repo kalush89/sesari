@@ -5,14 +5,87 @@ import GoogleProvider from 'next-auth/providers/google';
 import { prisma } from '../db';
 import { WorkspaceRole } from '../db';
 import type { ExtendedSession } from '../types/auth';
+import { AdapterUser } from 'next-auth/adapters';
+
+
+
+// Utility function to generate unique IDs (mimicking CUID/nanoid behavior)
+// We use a simple UUID generator for this example as we must remain self-contained.
+// This is used for creating the Workspace and Membership IDs.
+const generateUniqueId = (): string => crypto.randomUUID();
+
+/**
+ * Custom Adapter Wrapper to handle default workspace creation for new users.
+ * This logic runs in a privileged context (before the user's RLS session is active),
+ * ensuring the Foreign Key check passes when creating the default workspace.
+ */
+const CustomPrismaAdapter = (p: typeof prisma) => {
+  const adapter = PrismaAdapter(p);
+
+  return {
+    ...adapter,
+
+    // OVERRIDE: Modify the createUser function to also set up the default workspace
+    async createUser(user: AdapterUser) {
+      // 1. Execute the base adapter's createUser functionality first
+      // This is necessary because NextAuth passes the 'user' object back to the adapter, 
+      // which handles the insertion into the 'users' table.
+      // We explicitly cast the result to User for type safety in the following steps.
+      const createdUser = (await adapter.createUser!(user as AdapterUser)) 
+
+      // 2. Setup the default workspace and membership for the newly created user
+      try {
+        const workspaceId = generateUniqueId();
+        const membershipId = generateUniqueId();
+        
+        const workspaceName = `${createdUser.name ?? "User"}'s Workspace`;
+        const baseSlug = createdUser.email?.split("@")[0] || "user";
+        const timestamp = Date.now().toString().slice(-4);
+        const workspaceSlug = `${baseSlug}-workspace-${timestamp}`;
+
+        // Use a transaction to create both records atomically. 
+        // This transaction runs with elevated privileges (full Prisma access).
+        await p.$transaction([
+          // Create the default Workspace
+          p.workspace.create({
+            data: {
+              id: workspaceId,
+              name: workspaceName,
+              slug: workspaceSlug,
+              ownerId: createdUser.id,
+              planType: "free",
+            },
+          }),
+          // Create the Workspace Membership
+          p.workspaceMembership.create({
+            data: {
+              id: membershipId,
+              workspaceId,
+              userId: createdUser.id,
+              role: "owner",
+            },
+          }),
+        ]);
+
+        console.log(
+          `✅ Custom adapter created default workspace for new user: ${createdUser.email}`
+        );
+      } catch (error) {
+        console.error("Error in custom adapter creating default workspace:", error);
+      }
+
+      return createdUser;
+    },
+  };
+};
 
 /**
  * NextAuth configuration with Google OAuth, Prisma adapter, and custom callbacks
  * Implements JWT strategy with workspace context and role-based permissions
  */
 export const authOptions: NextAuthOptions = {
-  // Use Prisma adapter for database integration
-  adapter: PrismaAdapter(prisma),
+  // Use the CustomPrismaAdapter for database integration
+  adapter: CustomPrismaAdapter(prisma),
 
   // Configure providers
   providers: [
@@ -127,18 +200,20 @@ export const authOptions: NextAuthOptions = {
 
     /**
      * SignIn callback - controls whether a user is allowed to sign in
-     * Used for additional validation and workspace assignment
+     * SIMPLIFIED: Workspace creation is now handled by the CustomPrismaAdapter
      */
-    async signIn({ account }: { account: Account | null }) {
+    async signIn({ user, account }: { user: User; account: Account | null }) {
       try {
         // Allow sign in for Google OAuth
         if (account?.provider === 'google') {
+          // The adapter already ensured a default workspace was created if the user was new.
+          // We only need to return true here.
           return true;
         }
 
         return false;
       } catch (error) {
-        console.error('Error in signIn callback:', error);
+        console.error('Error in signIn callback (after adapter):', error);
         return false;
       }
     },
@@ -178,37 +253,8 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      // Create default workspace for new users
-      if (isNewUser && user.id) {
-        try {
-          // Generate a unique workspace slug
-          const baseSlug = user.name?.toLowerCase().replace(/\s+/g, '-') || 'workspace';
-          const timestamp = Date.now().toString().slice(-4);
-          const slug = `${baseSlug}-${timestamp}`;
-
-          // Create workspace and membership
-          await prisma.workspace.create({
-            data: {
-              name: `${user.name}'s Workspace`,
-              slug,
-              ownerId: user.id,
-              planType: 'free',
-              memberships: {
-                create: {
-                  userId: user.id,
-                  role: WorkspaceRole.OWNER,
-                  joinedAt: new Date(),
-                },
-              },
-            },
-          });
-
-          console.log(`Created default workspace for new user: ${user.email}`);
-        } catch (error) {
-          console.error('Error creating default workspace:', error);
-          // Don't fail the sign in process
-        }
-      }
+      // SIMPLIFIED: Workspace creation is now handled by the CustomPrismaAdapter, 
+      // so this block is removed to prevent redundant attempts.
     },
 
     async signOut({ session, token }: { session: Session; token: JWT }) {

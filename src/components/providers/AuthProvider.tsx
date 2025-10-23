@@ -121,11 +121,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isLoading = status === 'loading' || (isAuthenticated && !isInitialized);
 
   // Extract user information
-  const user = session?.user ? {
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name,
-    image: session.user.image,
+  const extendedSession = session as ExtendedSession;
+  const user = extendedSession?.user ? {
+    id: extendedSession.user.id,
+    email: extendedSession.user.email,
+    name: extendedSession.user.name,
+    image: extendedSession.user.image,
   } : null;
 
   // Extract workspace information
@@ -140,7 +141,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     id: ws.id,
     name: ws.name,
     slug: ws.slug,
-    role: ws.membership?.role as WorkspaceRole || WorkspaceRole.MEMBER,
+    role: ws.userRole as WorkspaceRole || WorkspaceRole.MEMBER,
   }));
 
   const contextValue: AuthContextType = {

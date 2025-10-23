@@ -3,6 +3,7 @@
 import { useEffect, ReactNode } from 'react';
 import { useSession } from 'next-auth/react';
 import { useWorkspaceStore } from '@/lib/stores/workspace-store';
+import { ExtendedSession } from '@/lib/types';
 
 interface WorkspaceProviderProps {
   children: ReactNode;
@@ -21,6 +22,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     isLoading,
     setLoading 
   } = useWorkspaceStore();
+  const extendedSession = session as ExtendedSession;
 
   useEffect(() => {
     if (status === 'loading') {
@@ -52,7 +54,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         initializeWorkspaces();
       }
     }
-  }, [status, session?.user?.id, refreshWorkspaces, clearWorkspaceContext, currentWorkspace, isLoading]);
+  }, [status, extendedSession?.user?.id, refreshWorkspaces, clearWorkspaceContext, currentWorkspace, isLoading]);
 
   // Show loading state while initializing workspace context
   if (status === 'authenticated' && isLoading && !currentWorkspace) {

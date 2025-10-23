@@ -18,7 +18,7 @@ const UpdateMemberSchema = z.object({
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { workspaceId: string; memberId: string } }
+  { params }: { params: Promise<{ workspaceId: string; memberId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -26,7 +26,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId, memberId } = params;
+    const { workspaceId, memberId } = await params;
     const body = await request.json();
 
     // Validate request body
@@ -127,7 +127,7 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { workspaceId: string; memberId: string } }
+  { params }: { params: Promise<{ workspaceId: string; memberId: string }> }
 ) {
   try {
     const session = await getAuthSession();
@@ -135,7 +135,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { workspaceId, memberId } = params;
+    const { workspaceId, memberId } = await params;
 
     // Set RLS context
     await setRLSContext(prisma, session.user.id);

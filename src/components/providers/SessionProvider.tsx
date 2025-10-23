@@ -5,6 +5,7 @@ import { Session } from 'next-auth';
 import { ReactNode, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useWorkspaceStore } from '@/lib/stores/workspace-store';
+import { ExtendedSession } from '@/lib/types';
 
 interface SessionProviderProps {
   children: ReactNode;
@@ -17,7 +18,8 @@ interface SessionProviderProps {
 function SessionHandler({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const { clearWorkspaceContext, refreshWorkspaces, currentWorkspace, isLoading } = useWorkspaceStore();
-
+  const extendedSession = session as ExtendedSession;
+  
   useEffect(() => {
     if (status === 'loading') {
       return; // Still loading session
@@ -29,10 +31,11 @@ function SessionHandler({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (status === 'authenticated' && session?.user && !isLoading) {
+
+    if (status === 'authenticated' && extendedSession?.user && !isLoading) {
       // Refresh workspace context when session is established
       // Only if we don't have current workspace or session workspace changed
-      const extendedSession = session as any;
+      //const extendedSession = session as ExtendedSession;
       const sessionWorkspaceId = extendedSession?.workspaceId;
       
       // Only refresh if we truly need to - avoid unnecessary API calls
@@ -50,7 +53,7 @@ function SessionHandler({ children }: { children: ReactNode }) {
         return () => clearTimeout(timeoutId);
       }
     }
-  }, [status, session?.user?.id, clearWorkspaceContext, refreshWorkspaces, currentWorkspace, isLoading]);
+  }, [status, extendedSession?.user?.id, clearWorkspaceContext, refreshWorkspaces, currentWorkspace, isLoading]);
 
   return <>{children}</>;
 }
